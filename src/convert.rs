@@ -502,7 +502,7 @@ fn closed_module(module: &str) -> Result<&str> {
 
 fn module_to_js_binary(module: &mut wast::core::Module, _wast: &str) -> Result<String> {
     let encoded = module.encode()?;
-    let js_arr = format!("{encoded:?}");
+    let js_arr = format!("new Uint8Array({encoded:?})");
     return Ok(js_arr);
 }
 
