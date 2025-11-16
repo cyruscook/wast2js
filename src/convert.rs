@@ -112,11 +112,15 @@ fn convert_directive(
     // https://github.com/WebAssembly/spec/blob/main/interpreter/README.md#scripts
     match directive {
         // (module $M? ...): Instantiate a module with an optional identifier.
-        Module(wast::QuoteWat::Wat(wast::Wat::Module(module))) => {
+        Module(wast::QuoteWat::Wat(wast::Wat::Module(mut module))) => {
             let next_instance = current_instance.map(|x| x + 1).unwrap_or(0);
-            let module_text = module_to_js_string(&module, wast)?;
+            let module_text = module_to_js_binary(&mut module, wast)?;
 
-            writejs!("let ${} = instantiate(`{}`);", next_instance, module_text)?;
+            writejs!(
+                "let ${} = binaryInstantiate(`{}`);",
+                next_instance,
+                module_text
+            )?;
             if let Some(id) = module.id {
                 writejs!("let ${} = ${};", id.name(), next_instance)?;
             }
@@ -260,12 +264,16 @@ fn convert_directive(
             module,
             message,
         } => {
-            let text = match module {
-                wast::QuoteWat::Wat(wast::Wat::Module(m)) => module_to_js_string(&m, wast)?,
-                wast::QuoteWat::QuoteModule(_, source) => quote_module_to_js_string(source)?,
+            let (fn_name, text) = match module {
+                wast::QuoteWat::Wat(wast::Wat::Module(mut m)) => {
+                    ("binaryInstantiate", module_to_js_binary(&mut m, wast)?)
+                }
+                wast::QuoteWat::QuoteModule(_, source) => {
+                    ("instantiate", quote_module_to_js_string(source)?)
+                }
                 other => bail!("unsupported {:?} in assert_invalid", other),
             };
-            let exec = Box::new(JSNode::Raw(format!("instantiate(`{}`)", text)));
+            let exec = Box::new(JSNode::Raw(format!("{fn_name}(`{text}`)")));
             let expected_node = Box::new(JSNode::Raw(format!(
                 "`{}`",
                 escape_template_name_string(message)
@@ -287,10 +295,12 @@ fn convert_directive(
             span: _,
             message,
         } => {
-            let text = match module {
-                wast::QuoteWat::Wat(wast::Wat::Module(m)) => module_to_js_string(&m, wast)?,
+            let (fn_name, text) = match module {
+                wast::QuoteWat::Wat(wast::Wat::Module(mut m)) => {
+                    ("binaryInstantiate", module_to_js_binary(&mut m, wast)?)
+                }
                 wast::QuoteWat::QuoteModule(_, source) => match quote_module_to_js_string(source) {
-                    Ok(t) => t,
+                    Ok(t) => ("instantiate", t),
                     Err(err) => {
                         writejs!("// ignoring badly-encoded assert_malformed: {:?}", err)?;
                         return Ok(());
@@ -298,7 +308,7 @@ fn convert_directive(
                 },
                 other => bail!("unsupported {:?} in assert_malformed", other),
             };
-            let exec = Box::new(JSNode::Raw(format!("instantiate(`{}`)", text)));
+            let exec = Box::new(JSNode::Raw(format!("{fn_name}(`{text}`)")));
             let expected_node = Box::new(JSNode::Raw(format!(
                 "`{}`",
                 escape_template_name_string(message)
@@ -320,11 +330,13 @@ fn convert_directive(
             module,
             message,
         } => {
-            let text = match module {
-                wast::Wat::Module(module) => module_to_js_string(&module, wast)?,
+            let (fn_name, text) = match module {
+                wast::Wat::Module(mut module) => {
+                    ("binaryInstantiate", module_to_js_binary(&mut module, wast)?)
+                }
                 other => bail!("unsupported {:?} in assert_unlinkable", other),
             };
-            let exec = Box::new(JSNode::Raw(format!("instantiate(`{}`)", text)));
+            let exec = Box::new(JSNode::Raw(format!("{fn_name}(`{text}`)")));
             let expected_node = Box::new(JSNode::Raw(format!(
                 "`{}`",
                 escape_template_name_string(message)
@@ -487,16 +499,10 @@ fn closed_module(module: &str) -> Result<&str> {
     return Ok(&module[0..i]);
 }
 
-fn module_to_js_string(module: &wast::core::Module, wast: &str) -> Result<String> {
-    let offset = span_to_offset(module.span, wast)?;
-    let opened_module = &wast[offset..];
-    if !opened_module.starts_with("module") {
-        return Ok(escape_template_module_string(opened_module));
-    }
-    Ok(escape_template_module_string(&format!(
-        "({}",
-        closed_module(opened_module)?
-    )))
+fn module_to_js_binary(module: &mut wast::core::Module, _wast: &str) -> Result<String> {
+    let encoded = module.encode()?;
+    let js_arr = format!("{encoded:?}");
+    return Ok(js_arr);
 }
 
 fn quote_module_to_js_string(quotes: Vec<(wast::token::Span, &[u8])>) -> Result<String> {
@@ -546,11 +552,13 @@ fn execute_to_js(
     match exec {
         wast::WastExecute::Invoke(invoke) => invoke_to_js(current_instance, invoke),
         wast::WastExecute::Wat(module) => {
-            let text = match module {
-                wast::Wat::Module(module) => module_to_js_string(&module, wast)?,
+            let (fn_name, text) = match module {
+                wast::Wat::Module(mut module) => {
+                    ("binaryInstantiate", module_to_js_binary(&mut module, wast)?)
+                }
                 other => bail!("unsupported {:?} at execute_to_js", other),
             };
-            Ok(Box::new(JSNode::Raw(format!("instantiate(`{}`)", text))))
+            Ok(Box::new(JSNode::Raw(format!("{fn_name}(`{text}`)"))))
         }
         wast::WastExecute::Get { module, global, .. } => {
             let instanceish = module
@@ -694,7 +702,6 @@ fn return_value_to_js_value(v: &wast::core::WastRetCore<'_>) -> Result<String> {
                 wast::core::AbstractHeapType::NoFunc => format!("value('nullfuncref', null)"),
                 wast::core::AbstractHeapType::Extern => format!("value('externref', null)"),
                 wast::core::AbstractHeapType::NoExtern => format!("value('nullexternref', null)"),
-                wast::core::AbstractHeapType::Exn => format!("value('exnref', null)"),
                 wast::core::AbstractHeapType::NoExn => format!("value('nullexnref', null)"),
                 other => bail!(
                     "couldn't convert ref.null {:?} to a js assertion value",
