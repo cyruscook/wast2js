@@ -117,7 +117,7 @@ fn convert_directive(
             let module_text = module_to_js_binary(&mut module, wast)?;
 
             writejs!(
-                "let ${} = binaryInstantiate(`{}`);",
+                "let ${} = binaryInstantiate({});",
                 next_instance,
                 module_text
             )?;
@@ -268,12 +268,13 @@ fn convert_directive(
                 wast::QuoteWat::Wat(wast::Wat::Module(mut m)) => {
                     ("binaryInstantiate", module_to_js_binary(&mut m, wast)?)
                 }
-                wast::QuoteWat::QuoteModule(_, source) => {
-                    ("instantiate", quote_module_to_js_string(source)?)
-                }
+                wast::QuoteWat::QuoteModule(_, source) => (
+                    "instantiate",
+                    format!("`{}`", quote_module_to_js_string(source)?),
+                ),
                 other => bail!("unsupported {:?} in assert_invalid", other),
             };
-            let exec = Box::new(JSNode::Raw(format!("{fn_name}(`{text}`)")));
+            let exec = Box::new(JSNode::Raw(format!("{fn_name}({text})")));
             let expected_node = Box::new(JSNode::Raw(format!(
                 "`{}`",
                 escape_template_name_string(message)
@@ -300,7 +301,7 @@ fn convert_directive(
                     ("binaryInstantiate", module_to_js_binary(&mut m, wast)?)
                 }
                 wast::QuoteWat::QuoteModule(_, source) => match quote_module_to_js_string(source) {
-                    Ok(t) => ("instantiate", t),
+                    Ok(t) => ("instantiate", format!("`{}`", t)),
                     Err(err) => {
                         writejs!("// ignoring badly-encoded assert_malformed: {:?}", err)?;
                         return Ok(());
@@ -308,7 +309,7 @@ fn convert_directive(
                 },
                 other => bail!("unsupported {:?} in assert_malformed", other),
             };
-            let exec = Box::new(JSNode::Raw(format!("{fn_name}(`{text}`)")));
+            let exec = Box::new(JSNode::Raw(format!("{fn_name}({text})")));
             let expected_node = Box::new(JSNode::Raw(format!(
                 "`{}`",
                 escape_template_name_string(message)
@@ -336,7 +337,7 @@ fn convert_directive(
                 }
                 other => bail!("unsupported {:?} in assert_unlinkable", other),
             };
-            let exec = Box::new(JSNode::Raw(format!("{fn_name}(`{text}`)")));
+            let exec = Box::new(JSNode::Raw(format!("{fn_name}({text})")));
             let expected_node = Box::new(JSNode::Raw(format!(
                 "`{}`",
                 escape_template_name_string(message)
@@ -558,7 +559,7 @@ fn execute_to_js(
                 }
                 other => bail!("unsupported {:?} at execute_to_js", other),
             };
-            Ok(Box::new(JSNode::Raw(format!("{fn_name}(`{text}`)"))))
+            Ok(Box::new(JSNode::Raw(format!("{fn_name}({text})"))))
         }
         wast::WastExecute::Get { module, global, .. } => {
             let instanceish = module
