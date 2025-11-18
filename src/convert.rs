@@ -114,7 +114,7 @@ fn convert_directive(
         // (module $M? ...): Instantiate a module with an optional identifier.
         Module(wast::QuoteWat::Wat(wast::Wat::Module(mut module))) => {
             let next_instance = current_instance.map(|x| x + 1).unwrap_or(0);
-            let module_text = module_to_js_binary(&mut module, wast)?;
+            let module_text = module_to_js_binary(&mut module)?;
 
             writejs!(
                 "let ${} = binaryInstantiate({});",
@@ -261,19 +261,10 @@ fn convert_directive(
         // (assert_invalid ...)
         AssertInvalid {
             span: _,
-            module,
+            mut module,
             message,
         } => {
-            let (fn_name, text) = match module {
-                wast::QuoteWat::Wat(wast::Wat::Module(mut m)) => {
-                    ("binaryInstantiate", module_to_js_binary(&mut m, wast)?)
-                }
-                wast::QuoteWat::QuoteModule(_, source) => (
-                    "instantiate",
-                    format!("`{}`", quote_module_to_js_string(source)?),
-                ),
-                other => bail!("unsupported {:?} in assert_invalid", other),
-            };
+            let (fn_name, text) = ("binaryInstantiate", qt_module_to_js_binary(&mut module)?);
             let exec = Box::new(JSNode::Raw(format!("{fn_name}({text})")));
             let expected_node = Box::new(JSNode::Raw(format!(
                 "`{}`",
@@ -292,23 +283,11 @@ fn convert_directive(
 
         // (assert_malformed ...)
         AssertMalformed {
-            module,
+            mut module,
             span: _,
             message,
         } => {
-            let (fn_name, text) = match module {
-                wast::QuoteWat::Wat(wast::Wat::Module(mut m)) => {
-                    ("binaryInstantiate", module_to_js_binary(&mut m, wast)?)
-                }
-                wast::QuoteWat::QuoteModule(_, source) => match quote_module_to_js_string(source) {
-                    Ok(t) => ("instantiate", format!("`{}`", t)),
-                    Err(err) => {
-                        writejs!("// ignoring badly-encoded assert_malformed: {:?}", err)?;
-                        return Ok(());
-                    }
-                },
-                other => bail!("unsupported {:?} in assert_malformed", other),
-            };
+            let (fn_name, text) = ("binaryInstantiate", qt_module_to_js_binary(&mut module)?);
             let exec = Box::new(JSNode::Raw(format!("{fn_name}({text})")));
             let expected_node = Box::new(JSNode::Raw(format!(
                 "`{}`",
@@ -333,7 +312,7 @@ fn convert_directive(
         } => {
             let (fn_name, text) = match module {
                 wast::Wat::Module(mut module) => {
-                    ("binaryInstantiate", module_to_js_binary(&mut module, wast)?)
+                    ("binaryInstantiate", module_to_js_binary(&mut module)?)
                 }
                 other => bail!("unsupported {:?} in assert_unlinkable", other),
             };
@@ -500,7 +479,13 @@ fn closed_module(module: &str) -> Result<&str> {
     return Ok(&module[0..i]);
 }
 
-fn module_to_js_binary(module: &mut wast::core::Module, _wast: &str) -> Result<String> {
+fn module_to_js_binary(module: &mut wast::core::Module) -> Result<String> {
+    let encoded = module.encode()?;
+    let js_arr = format!("new Uint8Array({encoded:?})");
+    return Ok(js_arr);
+}
+
+fn qt_module_to_js_binary<'a>(module: &mut wast::QuoteWat) -> Result<String> {
     let encoded = module.encode()?;
     let js_arr = format!("new Uint8Array({encoded:?})");
     return Ok(js_arr);
@@ -555,7 +540,7 @@ fn execute_to_js(
         wast::WastExecute::Wat(module) => {
             let (fn_name, text) = match module {
                 wast::Wat::Module(mut module) => {
-                    ("binaryInstantiate", module_to_js_binary(&mut module, wast)?)
+                    ("binaryInstantiate", module_to_js_binary(&mut module)?)
                 }
                 other => bail!("unsupported {:?} at execute_to_js", other),
             };
