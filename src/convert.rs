@@ -133,11 +133,7 @@ fn convert_directive(
             let next_instance = current_instance.map(|x| x + 1).unwrap_or(0);
             let module_text = qt_module_to_js_binary(&mut module)?;
 
-            writejs!(
-                "let ${} = binaryInstantiate(`{}`);",
-                next_instance,
-                module_text
-            )?;
+            writejs!("let ${next_instance} = binaryInstantiate({module_text});")?;
 
             *current_instance = Some(next_instance);
         }
@@ -147,9 +143,9 @@ fn convert_directive(
         ModuleDefinition(wast::QuoteWat::Wat(wast::Wat::Module(mut module))) => {
             let module_text = module_to_js_binary(&mut module)?;
             if let Some(id) = module.id {
-                writejs!("let ${} = binaryModule(`{}`);", id.name(), module_text)?;
+                writejs!("let ${} = binaryModule({module_text});", id.name())?;
             } else {
-                writejs!("let _anon_{} = binaryModule(`{}`);", line, module_text)?;
+                writejs!("let _anon_{line} = binaryModule({module_text});")?;
             }
         }
         ModuleDefinition(..) => bail!("unsupported module definition...definition"),
