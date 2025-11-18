@@ -129,23 +129,27 @@ fn convert_directive(
         }
         // (module quote "..."): Instantiate a module using the given literal text.
         // Identifiers are not supported.
-        Module(wast::QuoteWat::QuoteModule(_, source)) => {
+        Module(mut module @ wast::QuoteWat::QuoteModule { .. }) => {
             let next_instance = current_instance.map(|x| x + 1).unwrap_or(0);
-            let module_text = quote_module_to_js_string(source)?;
+            let module_text = qt_module_to_js_binary(&mut module)?;
 
-            writejs!("let ${} = instantiate(`{}`);", next_instance, module_text)?;
+            writejs!(
+                "let ${} = binaryInstantiate(`{}`);",
+                next_instance,
+                module_text
+            )?;
 
             *current_instance = Some(next_instance);
         }
         Module(..) => bail!("unsupported module definition"),
 
         // (module definition $M ...): Define and validate, but do not instantiate, a module
-        ModuleDefinition(wast::QuoteWat::Wat(wast::Wat::Module(module))) => {
-            let module_text = module_definition_to_js_string(&module, wast)?;
+        ModuleDefinition(wast::QuoteWat::Wat(wast::Wat::Module(mut module))) => {
+            let module_text = module_to_js_binary(&mut module)?;
             if let Some(id) = module.id {
-                writejs!("let ${} = module(`{}`);", id.name(), module_text)?;
+                writejs!("let ${} = binaryModule(`{}`);", id.name(), module_text)?;
             } else {
-                writejs!("let _anon_{} = module(`{}`);", line, module_text)?;
+                writejs!("let _anon_{} = binaryModule(`{}`);", line, module_text)?;
             }
         }
         ModuleDefinition(..) => bail!("unsupported module definition...definition"),
@@ -489,31 +493,6 @@ fn qt_module_to_js_binary<'a>(module: &mut wast::QuoteWat) -> Result<String> {
     let encoded = module.encode()?;
     let js_arr = format!("new Uint8Array({encoded:?})");
     return Ok(js_arr);
-}
-
-fn quote_module_to_js_string(quotes: Vec<(wast::token::Span, &[u8])>) -> Result<String> {
-    let mut text = String::new();
-    for (_, src) in quotes {
-        text.push_str(str::from_utf8(src)?);
-        text.push_str(" ");
-    }
-    let escaped = escape_template_module_string(&text);
-    Ok(escaped)
-}
-
-fn module_definition_to_js_string(module: &wast::core::Module, wast: &str) -> Result<String> {
-    let offset = span_to_offset(module.span, wast)?;
-    let opened_module = &wast[offset..];
-
-    // strip "module definition $M" down to just "module"
-    let pattern = r"^module definition (?:\$[a-zA-Z_$][a-zA-Z0-9_$]* )?(.*)";
-    let re = Regex::new(pattern).expect("Invalid regex pattern");
-    let without_definition = re.replace(opened_module, "module $1");
-
-    Ok(escape_template_module_string(&format!(
-        "({}",
-        closed_module(&without_definition)?
-    )))
 }
 
 fn invoke_to_js(current_instance: &Option<usize>, i: wast::WastInvoke) -> Result<Box<JSNode>> {
