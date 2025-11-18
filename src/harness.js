@@ -194,12 +194,14 @@ let linkage = {
       maximum: 20,
       element: "anyfunc",
     }),
-    table64: new WebAssembly.Table({
-      address: "i64",
-      initial: 10n,
-      maximum: 20n,
-      element: "anyfunc",
-    }),
+    table64: wasmMemory64IsSupported()
+      ? new WebAssembly.Table({
+          address: "i64",
+          initial: 10n,
+          maximum: 20n,
+          element: "anyfunc",
+        })
+      : undefined,
 
     memory: new WebAssembly.Memory({ initial: 1, maximum: 2 }),
 
